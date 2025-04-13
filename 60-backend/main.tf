@@ -1,4 +1,4 @@
-resource "aws_instance" "this" {
+resource "aws_instance" "backend" {
   ami = data.aws_ami.joindevops.id
   vpc_security_group_ids = [data.aws_ssm_parameter.backend_sg_id.value]
    instance_type ="t3.micro"
@@ -34,7 +34,7 @@ resource "null_resource" "cluster" {
   provisioner "remote-exec" {
     # Bootstrap script called with private_ip of each node in the cluster
     inline = [
-      "chmod+x /tmp/backend.sh",
+      "chmod +x /tmp/backend.sh",
       "sudo sh /tmp/backend.sh ${var.environment}"
     ]
   }
