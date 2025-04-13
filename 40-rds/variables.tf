@@ -13,3 +13,11 @@ variable "common_tags" {
         Terraform = "true"
     }
 }
+
+variable "zone_id" {
+    default = "Z021448929NMXW4P65UQE"
+}
+
+variable "domain_name" {
+    default = "parijathapractice.online"
+}
