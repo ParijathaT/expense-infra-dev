@@ -1,9 +1,9 @@
 resource "aws_instance" "backend" {
-  ami = data.aws_ami.joindevops.id
+  ami                    = data.aws_ami.joindevops.id # golden AMI
   vpc_security_group_ids = [data.aws_ssm_parameter.backend_sg_id.value]
-   instance_type ="t3.micro"
-   subnet_id = local.private_subnet_id
-tags = merge(
+  instance_type          = "t3.micro"
+  subnet_id   = local.private_subnet_id
+  tags = merge(
     var.common_tags,
     {
         Name = "${var.project_name}-${var.environment}-backend"
@@ -12,9 +12,9 @@ tags = merge(
 }
 
 resource "null_resource" "backend" {
-  # Changes to any instance of the cluster requires re-provisioning
+  # Changes to any instance of the instance requires re-provisioning
   triggers = {
-    instance_id = aws_istance.backend.id
+    instance_id = aws_instance.backend.id
   }
 
   # Bootstrap script can run on any instance of the cluster
@@ -22,12 +22,12 @@ resource "null_resource" "backend" {
   connection {
     host = aws_instance.backend.private_ip
     type = "ssh"
-    user = "ec2-user"
-    password = "Devops321"
+    user     = "ec2-user"
+    password = "DevOps321"
   }
 
   provisioner "file" {
-    source = "backend.sh"
+    source      = "backend.sh"
     destination = "/tmp/backend.sh"
   }
 
@@ -52,28 +52,35 @@ resource "aws_ami_from_instance" "backend" {
   depends_on = [aws_ec2_instance_state.backend]
 }
 
-resource "null_resourse" "backend-delete" {
-  provisioner "local_exec"{
-    command = "aws ec2 terminate_instances --instance_ids ${aws_instance.backend.id}"
+resource "null_resource" "backend_delete" {
+
+  triggers = {
+    instance_id = aws_instance.backend.id
   }
+
+  provisioner "local-exec" {
+    command = "aws ec2 terminate-instances --instance-ids ${aws_instance.backend.id}"
+  }
+
   depends_on = [aws_ami_from_instance.backend]
 }
 
 resource "aws_lb_target_group" "backend" {
-  name        = "local.resource_name"
-  port        = 8080
-  protocol    = "HTTP"
-  vpc_id      = local.vpc_id
-  health_check{
+  name     = local.resource_name
+  port     = 8080
+  protocol = "HTTP"
+  vpc_id   = local.vpc_id
+  deregistration_delay = 60
+
+  health_check {
     healthy_threshold = 2
     unhealthy_threshold = 2
     timeout = 5
-    protocol = "http"
+    protocol = "HTTP"
     port = 8080
     path = "/health"
     matcher = "200-299"
     interval = 10
-
   }
 }
 
@@ -83,9 +90,12 @@ resource "aws_launch_template" "backend" {
   instance_initiated_shutdown_behavior = "terminate"
   instance_type = "t3.micro"
   update_default_version = true
+
   vpc_security_group_ids = [local.backend_sg_id]
+
   tag_specifications {
     resource_type = "instance"
+
     tags = {
       Name = local.resource_name
     }
@@ -95,26 +105,27 @@ resource "aws_launch_template" "backend" {
 resource "aws_autoscaling_group" "backend" {
   name                      = local.resource_name
   max_size                  = 10
-  min_size                  = 2
-  health_check_grace_period = 180
+  min_size                  = 1
+  health_check_grace_period = 180 # 3 minutes for instance to intialise
   health_check_type         = "ELB"
   desired_capacity          = 1
-  target_group_arns = [ aws_1b_target_group.backend.arn]
-  launch_template = {
-    id = aws_launch_template.backend.id
+  target_group_arns = [aws_lb_target_group.backend.arn]
+  launch_template {
+    id      = aws_launch_template.backend.id
     version = "$Latest"
-  }     
-  vpc_zone_identifier = local.private_subnet_ids
+  }
+  vpc_zone_identifier       = local.private_subnet_ids
   instance_refresh {
     strategy = "Rolling"
-    preference {
+    preferences {
       min_healthy_percentage = 50
     }
+    triggers = ["launch_template"]
   }
-triggers = ["launch_template"]
+
   tag {
     key                 = "Name"
-    value               = "local.resource_name"
+    value               = local.resource_name
     propagate_at_launch = true
   }
 
@@ -123,15 +134,28 @@ triggers = ["launch_template"]
   }
 
   tag {
-    key                 = "project"
+    key                 = "Project"
     value               = "expense"
     propagate_at_launch = false
   }
 
   tag {
-    key                 = "environment"
+    key                 = "Environment"
     value               = "dev"
     propagate_at_launch = false
+  }
+}
+
+resource "aws_autoscaling_policy" "backend" {
+  name                   = "${local.resource_name}-backend"
+  policy_type            = "TargetTrackingScaling"
+  autoscaling_group_name = aws_autoscaling_group.backend.name
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+
+    target_value = 70.0
   }
 }
 
@@ -146,7 +170,7 @@ resource "aws_lb_listener_rule" "backend" {
 
   condition {
     host_header {
-      values = ["backend.app.${var.environment}.${var.domain_name}"]
+      values = ["backend.app-${var.environment}.${var.domain_name}"]
     }
   }
 }
